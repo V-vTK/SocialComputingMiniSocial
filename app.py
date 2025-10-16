@@ -714,7 +714,11 @@ def admin_dashboard():
     all_users = []
     for user in all_users_raw:
         user_dict = dict(user)
-        user_risk_score = user_risk_analysis(user_dict['id'])
+        try:
+            user_risk_score = user_risk_analysis(user_dict['id'])
+        except Exception as e:
+            print(f"Error calculating risk for user {user_dict['id']}: {e}")
+            user_risk_score = 0
         risk_label, risk_sort_key = get_risk_profile(user_risk_score)
         user_dict['risk_label'] = risk_label
         user_dict['risk_sort_key'] = risk_sort_key
@@ -922,7 +926,7 @@ def recommend(user_id, filter_following):
         if len(posts) >= 5:
             break
 
-    return posts
+    return sorted(posts, key=lambda p: p['created_at'], reverse=True)
 
 # Task 3.2
 def user_risk_analysis(user_id):
