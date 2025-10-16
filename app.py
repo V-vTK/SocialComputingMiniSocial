@@ -1,11 +1,13 @@
+from urllib.parse import urlparse
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
+import pandas as pd
+from week3 import detect_tiered_keywords, detect_urls, get_smallest_time_diff, translate_risk_score, unify_capitalization
 from werkzeug.security import generate_password_hash, check_password_hash
 from cryptography.fernet import Fernet
-import collections
 import json
 import sqlite3
 import hashlib
-import re
+from statistics import mean
 from datetime import datetime
 
 app = Flask(__name__)
@@ -889,10 +891,38 @@ def recommend(user_id, filter_following):
     - http://www.configworks.com/mz/handout_recsys_sac2010.pdf
     - https://www.researchgate.net/publication/227268858_Recommender_Systems_Handbook
     """
+    db_conn = get_db()
 
-    recommended_posts = {} 
+    similar_users = set()
+    followed_users = db_conn.execute(f"SELECT followed_id FROM follows WHERE follower_id = ?", (user_id,)).fetchall()
+    followed_users = [followed_user[0] for followed_user in followed_users]
+    similar_users.update(followed_users)
+    
+    # Get comments and reactions without sad & angry
+    reaction_users = db_conn.execute("SELECT posts.user_id, reactions.post_id, reactions.reaction_type FROM reactions JOIN posts ON reactions.post_id = posts.id WHERE reactions.user_id = ? AND reactions.reaction_type NOT IN ('angry', 'sad')", (user_id,)).fetchall()
+    comment_users = db_conn.execute("SELECT posts.user_id, comments.post_id FROM comments JOIN posts ON comments.post_id = posts.id WHERE comments.user_id = ?", (user_id,)).fetchall()
+    similar_users.update(reaction_user[0] for reaction_user in reaction_users)
+    similar_users.update(comment_user[0] for comment_user in comment_users)
+    
+    approved_users = ",".join(f"'{user_id}'" for user_id in similar_users)
 
-    return recommended_posts;
+    # Get top 5 posts between these users SORT BY created_at DESC
+    query = f"SELECT posts.id, posts.user_id, posts.content, users.username, posts.created_at, COUNT(DISTINCT reactions.id), COUNT(DISTINCT comments.id) FROM posts " \
+            f"JOIN reactions ON posts.id = reactions.post_id JOIN comments on posts.id = comments.post_id JOIN users ON posts.user_id = users.id " \
+            f"WHERE (reactions.user_id IN ({approved_users}) OR comments.user_id IN ({approved_users}) OR posts.user_id IN ({approved_users}))" \
+            f"GROUP BY posts.id ORDER BY (COUNT(DISTINCT reactions.id) + COUNT(DISTINCT comments.id)) DESC, posts.created_at DESC"
+
+    # Filter the post to followed users if filter_following
+    result = pd.read_sql_query(query, db_conn)
+    posts = []
+    for _, row in result.iterrows():
+        if filter_following and row['user_id'] not in followed_users:
+            continue
+        posts.append({'id': row['id'], 'user_id': row['user_id'], 'content': row['content'], 'username': row['username'], 'created_at': row['created_at']})
+        if len(posts) >= 5:
+            break
+
+    return posts
 
 # Task 3.2
 def user_risk_analysis(user_id):
@@ -908,10 +938,37 @@ def user_risk_analysis(user_id):
             password: admin
         Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
+    db_conn = get_db()
+    query = f"SELECT created_at, profile FROM users WHERE id = {user_id}"
+    df = pd.read_sql_query(query, db_conn)
     
-    score = 0
+    if len(df) == 0:
+        raise Exception(f"Data not found for user with ID {user_id}")
 
-    return score;
+    account_age_days = (pd.to_datetime('now') - pd.to_datetime(df["created_at"][0])).days
+    multiplier = 1.5 if account_age_days < 7 else 1.2 if account_age_days < 30 else 1.0
+    profile_score = moderate_content(df["profile"][0])[1]
+
+    transaction_scores = {"posts": [], "comments": []}
+    for table in ["comments", "posts"]:
+        query = f"SELECT content FROM {table} WHERE user_id = {user_id}"
+        content_df = pd.read_sql_query(query, db_conn)
+        for content in content_df['content']:
+            transaction_scores[table].append(moderate_content(content)[1])
+
+    avg_posts = mean(transaction_scores["posts"]) if len(transaction_scores["posts"]) > 0 else 0.0
+    avg_comments = mean(transaction_scores["comments"]) if len(transaction_scores["comments"]) > 0 else 0.0
+    user_score = ((profile_score * 1) + (avg_posts * 3) + (avg_comments * 1)) * multiplier
+
+    # Custom Rule: Frequency of posts/comments 
+    # If any post of comment per user is created less than 1 seconds apart add 2.5 to risk score.
+    query = f"SELECT created_at FROM comments WHERE user_id = {user_id} UNION SELECT created_at FROM posts WHERE user_id = {user_id} ORDER BY created_at ASC"
+    time_df = pd.read_sql_query(query, db_conn)
+    smallest_time_diff = get_smallest_time_diff(time_df) # None if one or less transactions found
+    if smallest_time_diff is not None and smallest_time_diff < 1.0:
+        user_score += 2.5
+
+    return user_score
 
     
 # Task 3.3
@@ -931,11 +988,45 @@ def moderate_content(content):
             password: admin
     Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
+    risk_score = 0.0
+    if content is None:
+        return content, risk_score, translate_risk_score(risk_score)
 
-    moderated_content = content
-    score = 0
-    
-    return moderated_content, score
+    case_insensitive_content = content.lower()
+    tier_1_keywords = {"keywords": TIER1_WORDS, "result": 5.0, "censored": "[content removed due to severe violation]"}
+    tier_2_phrases = {"keywords": TIER2_PHRASES, "result": 5.0, "censored": "[content removed due to spam/scam policy]"}
+    tier_3_wordlist = {"keywords": TIER3_WORDS, "increment": 2.0, "replace" : "*"}
+
+    # Rule 1.1.1 (Tier 1 Words):
+    if any(keyword in case_insensitive_content for keyword in tier_1_keywords["keywords"]):
+        return tier_1_keywords["censored"], tier_1_keywords["result"]
+
+    # Rule 1.1.2 (Tier 2 Phrases): 
+    if any(phrase in case_insensitive_content for phrase in tier_2_phrases["keywords"]):
+        return tier_2_phrases["censored"], tier_2_phrases["result"]
+
+    # Stage 1.2: Scored Violations & Filtering
+    # Rule 1.2.1 (Tier 3 Words):
+    case_insensitive_content, tier_3_score = detect_tiered_keywords(case_insensitive_content, tier_3_wordlist)
+    risk_score += tier_3_score * tier_3_wordlist["increment"]
+
+    # Rule 1.2.2 (External Links):
+    case_insensitive_content, url_count = detect_urls(case_insensitive_content)
+    risk_score += url_count * 2.0
+
+    # Rule 1.2.3 (Excessive Capitalization):
+    content_length, max_uppecase = len(content), len(content) * 0.7
+    upper_case_num = sum(1 for char in content if char.isupper())
+    if content_length > 15 and upper_case_num > max_uppecase:
+        risk_score += 0.5
+
+    # Custom rule: Excessive punctuation
+    punctuation_marks = ['!', '?']
+    punctuation_sum = sum(1 for c in content if c in punctuation_marks)
+    if content_length > 15 and punctuation_sum > content_length * 0.1:
+        risk_score += 0.5
+
+    return unify_capitalization(content, case_insensitive_content), risk_score
 
 
 if __name__ == '__main__':
