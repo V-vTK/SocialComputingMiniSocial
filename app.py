@@ -945,7 +945,7 @@ def user_risk_analysis(user_id):
     db_conn = get_db()
     query = f"SELECT created_at, profile FROM users WHERE id = {user_id}"
     df = pd.read_sql_query(query, db_conn)
-    
+
     if len(df) == 0:
         raise Exception(f"Data not found for user with ID {user_id}")
 
@@ -994,7 +994,7 @@ def moderate_content(content):
     """
     risk_score = 0.0
     if content is None:
-        return content, risk_score, translate_risk_score(risk_score)
+        return content, risk_score
 
     case_insensitive_content = content.lower()
     tier_1_keywords = {"keywords": TIER1_WORDS, "result": 5.0, "censored": "[content removed due to severe violation]"}
