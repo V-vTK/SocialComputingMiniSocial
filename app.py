@@ -1,7 +1,7 @@
 from urllib.parse import urlparse
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 import pandas as pd
-from week3 import detect_tiered_keywords, detect_urls, get_smallest_time_diff, translate_risk_score, unify_capitalization
+from week3 import detect_tiered_keywords, detect_urls, get_smallest_time_diff, unify_capitalization
 from werkzeug.security import generate_password_hash, check_password_hash
 from cryptography.fernet import Fernet
 import json
@@ -922,9 +922,18 @@ def recommend(user_id, filter_following):
     for _, row in result.iterrows():
         if filter_following and row['user_id'] not in followed_users:
             continue
-        posts.append({'id': row['id'], 'user_id': row['user_id'], 'content': row['content'], 'username': row['username'], 'created_at': row['created_at']})
+        posts.append({'id': row['id'], 'user_id': row['user_id'], 'username': row['username'], 'content': row['content'], 'created_at': row['created_at']})
         if len(posts) >= 5:
             break
+
+    # The assignment can be understood that it always recommends 5 posts, but this not possible if there are no followed users.
+    # num_of_posts = len(posts)
+    # if num_of_posts < 5 and not filter_following:
+    #     needed_posts = 5 - num_of_posts
+    #     query = f"SELECT posts.id, posts.user_id, posts.content, posts.created_at, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY RANDOM() LIMIT {needed_posts}"
+    #     result = pd.read_sql_query(query, db_conn)
+    #     for _, row in result.iterrows():
+    #         posts.append({'id': row['id'], 'user_id': row['user_id'], 'username': row['username'], 'content': row['content'], 'created_at': row['created_at']})
 
     return sorted(posts, key=lambda p: p['created_at'], reverse=True)
 
