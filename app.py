@@ -1041,7 +1041,46 @@ def moderate_content(content):
 
     return unify_capitalization(content, case_insensitive_content), risk_score
 
+def get_tables():
+    db = get_db()
+    query_result = db.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    tables = query_result.fetchall()
+    clean_tables = [tuple[0] for tuple in tables]
+    return clean_tables
+
+def report_post(post_id):
+    print(post_id)
+
+    pass
+
+def create_reports_table():
+    db = get_db()
+    # if "reports" in get_tables():
+    #     return
+    db.execute('DROP TABLE IF EXISTS reports')
+    db.execute('''
+        CREATE TABLE reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reporter_id INTEGER,
+            post_id INTEGER,
+            reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (post_id) REFERENCES posts(id)
+        )
+    ''')
+    db.commit()
+
+@app.route('/posts/<int:post_id>/report', methods=['POST'])
+def report_post(post_id):
+    print("Here")
+    if 'user_id' not in session:
+        flash('You must be logged in to to report a post', 'danger')
+        return redirect(url_for('login'))
+    print(f"Reporting post {post_id} by user {session['user_id']}")
+
+    return redirect(url_for('post_detail', post_id=post_id))
+
+with app.app_context():
+    create_reports_table()
 
 if __name__ == '__main__':
     app.run(debug=True, port=8080)
-

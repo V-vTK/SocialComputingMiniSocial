@@ -28,7 +28,8 @@
       <!-- Reactions Display and Add Reaction Button (Copied from feed.html.j2) -->
       <div class="d-flex align-items-center mt-2 mb-2">
         <!-- Display existing reactions -->
-        <div class="reactions-display me-2">
+        <div class="flex-column align-items-between justify-content-between mt-2 mb-2">
+          <div class="reactions-display me-2">
             {% if reactions %}
               {% for react in reactions %}
                 <span class="text-dark me-1" title="{{ react.reaction_type|capitalize }}">
@@ -38,7 +39,14 @@
             {% else %}
               <span class="text-muted small">No reactions yet</span>
             {% endif %}
+          </div>
         </div>
+        <div class="ms-auto">
+          <form action="{{ url_for('report_post', post_id=post.id) }}" method="POST" class="d-inline">
+            <button type="submit" class="btn btn-sm btn-danger"> report </button>
+          </form>
+        </div>
+      </div>
 
         <!-- Add Reaction Dropdown Button -->
         {% if session.get('user_id') %}

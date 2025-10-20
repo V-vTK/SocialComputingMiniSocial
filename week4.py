@@ -181,8 +181,16 @@ class Week4:
         https://www.tomsguide.com/news/live/slack-down-updates-outage-2-25
 
         '''
+        pass
 
     def exercise4(self, log_results=True):
+        '''
+        Exercise 4.4 Design and implement a new social feature in Mini Social. 
+        For example, a user reputation scoring system, a reporting system, a feature to find related content to a post, new post modalities such as polls or reposts. 
+        Your change must include a UI improvement or addition. Do not implement non-social, technical features, such as resource optimization, security improvements or style changes. 
+        Document the design and implementation process of your addition here. 
+        You must also demonstrate a fully functional feature in a maximum 2-minute video recording uploaded to Moodle. (5 points)
+        '''
         # See app.py
         pass
 
