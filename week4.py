@@ -12,7 +12,6 @@ from gensim.models.coherencemodel import CoherenceModel
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
-import nltk
 
 #nltk.download()
 #https://www.nltk.org/data.html
@@ -25,7 +24,7 @@ class Week4:
         self.cursor = self.conn.cursor()
         self.tables = self.get_tables()
         self.stop_words = stopwords.words('english')
-        self.stop_words.extend(['would', 'day', 'like', 'today', 'best', 'always', 'amazing', 'bought', 'quick' 'people', 'new', 'fun', 'think', 'know', 'believe',
+        self.stop_words.extend(['would', 'cant', 'got', 'day', 'like', 'today', 'best', 'always', 'amazing', 'bought', 'quick' 'people', 'new', 'fun', 'think', 'know', 'believe',
                                 'many', 'thing', 'need', 'small', 'even', 'make', 'love', 'mean', 'fact', 'question', 'time', 'reason', 'also', 'could', 'true', 'well',
                                 'life', 'said', 'year', 'going', 'good', 'really', 'much', 'want', 'back', 'look', 'article', 'host', 'university', 'reply', 'thanks', 'mail', 'post', 'please'])
         print('Database connection and class initialized \n')
@@ -57,13 +56,20 @@ class Week4:
         # Materials:
         # https://www.geeksforgeeks.org/nlp/topic-modeling-using-latent-dirichlet-allocation-lda/
         # https://github.com/Crowd-Computing-Oulu/soco-exercise-solutions/blob/main/exercise_task_14.py
-        data = pd.read_sql_query(f"SELECT content FROM posts", self.conn)
+        query = """
+            SELECT id, content, 'post' AS table_name
+            FROM posts
+            UNION ALL
+            SELECT id, content, 'comment' AS table_name
+            FROM comments
+        """
+        data = pd.read_sql_query(query, self.conn)
         
         data['content'] = data['content'].apply(self._preprocess_text)
         lemmatizer = WordNetLemmatizer()
         
         bow_list = []
-        for _, row in data.iterrows():
+        for i, row in data.iterrows():
             text = row['content']
             tokens = word_tokenize(text.lower())
             tokens = [lemmatizer.lemmatize(t) for t in tokens]
@@ -71,6 +77,8 @@ class Week4:
             tokens = [t for t in tokens if t.isalpha() and t not in self.stop_words]
             if len(tokens) > 0:
                 bow_list.append(tokens)
+            else:
+                data = data.drop(i, axis=0)
 
         dictionary = Dictionary(bow_list)
         dictionary.filter_extremes(no_below=2, no_above=0.3)
@@ -86,16 +94,18 @@ class Week4:
             for i, topic in topics:
                 print(f"Topic {i}: {topic}")
 
-        topic_counts = [0] * num_of_topics
+        dominant_topic = []
         for bow in corpus:
-            topic_dist = lda.get_document_topics(bow)
-            dominant_topic = max(topic_dist, key=lambda x: x[1])[0]
-            topic_counts[dominant_topic] += 1
-        if log_results:
-            for i, count in enumerate(topic_counts):
-                print(f"Topic {i}: {count} posts")
+            top = lda.get_document_topics(bow, minimum_probability=0)
+            dominant_topic.append(max(top, key=lambda x: x[1])[0])
+        data['dominant_topic'] = dominant_topic
 
-        return topics, coherence_score, lda, topic_counts
+        if log_results:
+            topic_counts = data['dominant_topic'].value_counts().sort_index()
+            for i, count in topic_counts.items():
+                print(f"Topic {i}: {count} posts / comments")
+
+        return topics, data, coherence_score, lda
 
     def _preprocess_text(self, text):
         '''
@@ -114,24 +124,31 @@ class Week4:
         Perform sentiment analysis on posts and comments. 
         What is the overall tone of the platform? How does sentiment vary across user posts discussing different topics identified in Exercise 3? 
         Please use VADER (nltk.sentiment) for this analysis. Answer and explain your queries/calculations below. 
-        You may use SQL and/or Python to perform this task. (5 points)        
+        You may use SQL and/or Python to perform this task. (5 points) 
+
+        Materials:     
+        https://www.geeksforgeeks.org/python/python-sentiment-analysis-using-vader/
         '''
         sid = SentimentIntensityAnalyzer()
-        for table in ['posts', 'comments']:
-            if table not in self.tables:
-                raise Exception(f"Table {table} must be inside the database to run exercise4")
-            query = f"SELECT content FROM {table}"
-            df = pd.read_sql_query(query, self.conn)
-            if log_results:
-                print(f"Rows in {table}: {len(df)}")
-            # for content in df['content']:
-            #     score = sid.polarity_scores(content)
-            #     if log_results:
-            #         print(f"Sentiment scores for content in {table}: {score}")
+        df = self.exercise1(log_results=False)[1]
+        for index, row in df.iterrows():
+            content = row['content']
+            score = sid.polarity_scores(content)
+            df.at[index, 'neg'] = score['neg']
+            df.at[index, 'neu'] = score['neu']
+            df.at[index, 'pos'] = score['pos']
+            df.at[index, 'compound'] = score['compound']
 
         # What is the overall tone of the platform?
-
+        overall_score = df['compound'].mean()
         # How does sentiment vary across user posts discussing different topics identified in Exercise 3?
+        topic_scores = df[df['table_name'] == 'post'].groupby('dominant_topic')['compound'].mean()
+
+        if log_results:
+            print(df)
+            print(f"Overall sentiment score: {overall_score}")
+            print("Sentiment scores by topic for posts:")
+            print(topic_scores)
 
     def exercise3(self, log_results=True):
         '''
@@ -142,21 +159,21 @@ class Week4:
         You do not need to write code in this exercise unless your plan includes a specific change to an algorithm or function. (5 points)        
         
         Discord has changed database architecture multiple times first from Mongo to Cassandra and then to ScyllaDB. These database changes were needed because of rapid platform growth. 
-        Mini Social is currently small enough to be handled by a single SQL Lite database, but in the future it might be necessary to upgrade to something more scalable.
-        It's also important to know and test the database architecture throroughly. After Discord's migration to Cassandra they had an big issue with how the messages were deleted. 
-        Instead of directly deleting the messages Cassandra creates thombstones to effectively skip deleted records. This caused the JVM to overload and trigger the "stop-the-world" error. 
-        For users this was seen as slowness and eventually full downtime. If the Discord developers had know they would have simply lowered the tombstone lifespan to 2 days avoiding the overload.
+        Mini Social is currently small enough to be handled by a single SQL Lite database, but in the future, it might be necessary to upgrade to something more scalable.
+        It's also important to know and test the database architecture thoroughly. After Discord's migration to Cassandra they had a big issue with how the messages were deleted. 
+        Instead of directly deleting the messages Cassandra creates tombstones to effectively skip deleted records. This caused the JVM to overload and trigger the "stop-the-world" error. 
+        For users this was seen as slowness and eventually full downtime. If the Discord developers had known, they would have simply lowered the tombstone lifespan to 2 days avoiding the overload.
 
-        When the time comes Mini Social should consider other database options like PostgreSQL, Cassandra or ScyllaDB. Transformations should be done well ahead and tested throroughly.
+        When the time comes Mini Social should consider other database options like PostgreSQL, Cassandra or ScyllaDB. Transformations should be done well ahead and tested thoroughly.
         With Blackbox testing the new database can be tested alongside the old one to compare query results and performance.
 
-        Slack had an Major outage in 2025 due to database shards which caused API breakdowns. As these sharding errors grow over time it's important to monitor API performance and error rates. 
+        Slack had a major outage in 2025 due to database shards which caused API breakdowns. As these sharding errors grow over time it's important to monitor API performance and error rates. 
         Currently Mini Social does not have any monitoring or alerting in place. Any slowly creeping performance issues are only detected when it's too late.
-        For improvement each API endpoint should be montored for latency and errors. There should also be testing and alerting that triggers when the service starts failing.
+        For improvement each API endpoint should be monitored for latency and errors. There should also be testing and alerting that triggers when the service starts failing.
         Long downtime causes the users to be unhappy and less confident with the platform.
-        
+
         Disclaimer: The Slack source is and 3rd party company, which offers API intelligence services, but it still had the best reporting on the issue.
-        
+
         https://discord.com/blog/how-discord-stores-billions-of-messages
         https://discord.com/blog/how-discord-stores-trillions-of-messages
 
@@ -172,8 +189,7 @@ class Week4:
 
 if __name__ == "__main__":
     db_class = Week4(db_file='database.sqlite')
-    #db_class.main()
     db_class.exercise1(log_results=True)
-    # db_class.exercise2(log_results=False)
+    db_class.exercise2(log_results=True)
     # db_class.exercise3(log_results=False)
     # db_class.exercise4(log_results=True)
