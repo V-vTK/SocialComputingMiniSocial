@@ -1,17 +1,18 @@
 import re
-import gensim
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from gensim.models import CoherenceModel
-from collections import defaultdict
 from nltk.corpus import stopwords
 import sqlite3
 import pandas as pd
-import pandasql as ps
-import numpy as np
 import json
+import pandas as pd
+from gensim.corpora import Dictionary
+from gensim.models.ldamodel import LdaModel
+from gensim.models.coherencemodel import CoherenceModel
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
 import nltk
-import spacy
-
 
 #nltk.download()
 #https://www.nltk.org/data.html
@@ -24,10 +25,9 @@ class Week4:
         self.cursor = self.conn.cursor()
         self.tables = self.get_tables()
         self.stop_words = stopwords.words('english')
-        self.stop_words.extend(['would', 'best', 'always', 'amazing', 'bought', 'quick', 'people', 'new', 'fun', 'think', 'know', 'believe', 'many', 'thing',
-                                'need', 'small', 'even', 'make', 'love', 'mean', 'fact', 'question', 'time', 'reason', 'also', 'could', 'true', 'well',  'life', 'said', 'year', 'going',
-                                'good', 'really', 'much', 'want', 'back', 'look', 'article', 'host', 'university', 'reply', 'thanks', 'mail', 'post', 'please'])
-        self.nlp = spacy.load('en_core_web_sm', disable=['parser', 'ner'])
+        self.stop_words.extend(['would', 'day', 'like', 'today', 'best', 'always', 'amazing', 'bought', 'quick' 'people', 'new', 'fun', 'think', 'know', 'believe',
+                                'many', 'thing', 'need', 'small', 'even', 'make', 'love', 'mean', 'fact', 'question', 'time', 'reason', 'also', 'could', 'true', 'well',
+                                'life', 'said', 'year', 'going', 'good', 'really', 'much', 'want', 'back', 'look', 'article', 'host', 'university', 'reply', 'thanks', 'mail', 'post', 'please'])
         print('Database connection and class initialized \n')
 
     def get_tables(self):
@@ -54,38 +54,48 @@ class Week4:
         Identify the 10 most popular topics discussed on our platform. Use Latent Dirichlet Allocation (LDA) with the gensim library.
         Answer and explain your queries/calculations below. You may use SQL and/or Python to perform this task. 5 points)
         '''
+        # Materials:
         # https://www.geeksforgeeks.org/nlp/topic-modeling-using-latent-dirichlet-allocation-lda/
-        query = "SELECT content FROM posts UNION ALL SELECT content FROM comments"
-        df = pd.read_sql_query(query, self.conn)
-        df['clean_content'] = df['content'].apply(self._preprocess_text)
-        df['tokens'] = df['clean_content'].apply(self._tokenize)
-        df['lemmas'] = df['tokens'].apply(self._lemmatize)
-        id2word = gensim.corpora.Dictionary(df['lemmas'])
-        texts = df['lemmas']
-        corpus = [id2word.doc2bow(text) for text in texts]
-        lda_model = gensim.models.ldamodel.LdaModel(
-                                            corpus=corpus,
-                                            id2word=id2word,
-                                            num_topics=num_of_topics, 
-                                            random_state=100,
-                                            update_every=1,
-                                            chunksize=100,
-                                            passes=10,
-                                            alpha='auto',
-                                            per_word_topics=True)
-        topics = lda_model.print_topics(num_words=10)
+        # https://github.com/Crowd-Computing-Oulu/soco-exercise-solutions/blob/main/exercise_task_14.py
+        data = pd.read_sql_query(f"SELECT content FROM posts", self.conn)
+        
+        data['content'] = data['content'].apply(self._preprocess_text)
+        lemmatizer = WordNetLemmatizer()
+        
+        bow_list = []
+        for _, row in data.iterrows():
+            text = row['content']
+            tokens = word_tokenize(text.lower())
+            tokens = [lemmatizer.lemmatize(t) for t in tokens]
+            tokens = [t for t in tokens if len(t) > 2]
+            tokens = [t for t in tokens if t.isalpha() and t not in self.stop_words]
+            if len(tokens) > 0:
+                bow_list.append(tokens)
+
+        dictionary = Dictionary(bow_list)
+        dictionary.filter_extremes(no_below=2, no_above=0.3)
+        corpus = [dictionary.doc2bow(tokens) for tokens in bow_list]
+
+        lda = LdaModel(corpus, num_topics=num_of_topics, id2word=dictionary, passes=10, random_state=2)
+        coherence_model = CoherenceModel(model=lda, texts=bow_list, dictionary=dictionary, coherence='c_v')
+        coherence_score = coherence_model.get_coherence()
+        topics = lda.print_topics(num_words=5)
+
         if log_results:
-            print(df)
-            for topic in topics:
-                print(topic)
+            print(f'coherence_score: {coherence_score}')
+            for i, topic in topics:
+                print(f"Topic {i}: {topic}")
 
+        topic_counts = [0] * num_of_topics
+        for bow in corpus:
+            topic_dist = lda.get_document_topics(bow)
+            dominant_topic = max(topic_dist, key=lambda x: x[1])[0]
+            topic_counts[dominant_topic] += 1
+        if log_results:
+            for i, count in enumerate(topic_counts):
+                print(f"Topic {i}: {count} posts")
 
-    def _lemmatize(self, tokens):
-        '''
-        Copy paste from https://www.geeksforgeeks.org/nlp/topic-modeling-using-latent-dirichlet-allocation-lda/
-        '''
-        doc = self.nlp(" ".join(tokens))
-        return [token.lemma_ for token in doc]
+        return topics, coherence_score, lda, topic_counts
 
     def _preprocess_text(self, text):
         '''
@@ -97,17 +107,6 @@ class Week4:
         text = re.sub('[^a-zA-Z]', ' ', text)  # Remove non-alphabet characters
         text = text.lower()  # Convert to lowercase
         return text
-
-    def _tokenize(self, text):
-        '''
-        Copy paste from https://www.geeksforgeeks.org/nlp/topic-modeling-using-latent-dirichlet-allocation-lda/
-        '''
-        try:
-            tokens = gensim.utils.simple_preprocess(text, deacc=True)
-            tokens = [token for token in tokens if token not in self.stop_words]
-        except Exception as e:
-            print(f"Error in tokenizing text: {e}")
-        return tokens
 
     def exercise2(self, log_results=True):
         '''
@@ -173,8 +172,8 @@ class Week4:
 
 if __name__ == "__main__":
     db_class = Week4(db_file='database.sqlite')
-
+    #db_class.main()
     db_class.exercise1(log_results=True)
-    db_class.exercise2(log_results=False)
-    db_class.exercise3(log_results=False)
-    db_class.exercise4(log_results=True)
+    # db_class.exercise2(log_results=False)
+    # db_class.exercise3(log_results=False)
+    # db_class.exercise4(log_results=True)
