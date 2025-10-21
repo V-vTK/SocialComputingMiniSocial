@@ -1056,9 +1056,9 @@ def get_tables():
 
 def create_reports_table():
     db = get_db()
-    # if "reports" in get_tables():
-    #     return
-    db.execute('DROP TABLE IF EXISTS reports')
+    if "reports" in get_tables():
+        return
+
     db.execute('''
         CREATE TABLE reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
