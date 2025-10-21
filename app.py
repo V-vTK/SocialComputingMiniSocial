@@ -393,13 +393,15 @@ def post_detail(post_id):
         comment['content'] = moderated_comment_content
         comments.append(comment)
 
+    reported = is_reported(post_id, session.get('user_id'))
     # Pass the moderated data to the template
     return render_template('post_detail.html.j2',
                            post=post,
                            reactions=reactions,
                            comments=comments,
                            reaction_emojis=REACTION_EMOJIS,
-                           reaction_types=REACTION_TYPES)
+                           reaction_types=REACTION_TYPES,
+                           is_reported=reported)
 
 @app.route('/about')
 def about():
@@ -758,6 +760,9 @@ def admin_dashboard():
 
     posts.sort(key=lambda x: x['risk_score'], reverse=True) # Sort after fetching and scoring
 
+    for post in posts:
+        post['report_count'] = get_report_count(post['id'])
+
     # --- Comments Tab Data ---
     comments_offset = (comments_page - 1) * PAGE_SIZE
     total_comments_count = query_db('SELECT COUNT(*) as count FROM comments', one=True)['count']
@@ -1048,10 +1053,6 @@ def get_tables():
     clean_tables = [tuple[0] for tuple in tables]
     return clean_tables
 
-def report_post(post_id):
-    print(post_id)
-
-    pass
 
 def create_reports_table():
     db = get_db()
@@ -1069,15 +1070,55 @@ def create_reports_table():
     ''')
     db.commit()
 
-@app.route('/posts/<int:post_id>/report', methods=['POST'])
-def report_post(post_id):
-    print("Here")
-    if 'user_id' not in session:
-        flash('You must be logged in to to report a post', 'danger')
-        return redirect(url_for('login'))
-    print(f"Reporting post {post_id} by user {session['user_id']}")
+def get_report_count(post_id):
+    db = get_db()
+    result = db.execute('SELECT COUNT(*) as reports FROM reports WHERE post_id = ?', (post_id,)).fetchone()
+    return result['reports'] if result else 0
 
+def is_reported(post_id, reporter_id):
+    db = get_db()
+    report = db.execute('SELECT * FROM reports WHERE post_id = ? AND reporter_id = ?', (post_id, reporter_id)).fetchone()
+    return report is not None
+
+@app.route('/posts/<int:post_id>/report', methods=['POST'])  # DELETE somehow does not work
+def report_post(post_id):
+    if 'user_id' not in session:
+        flash('Log in before reporting a post', 'danger')
+        return redirect(url_for('login'))
+
+    if request.method == 'DELETE':
+        db = get_db()
+        db.execute('DELETE FROM reports WHERE post_id = ? AND reporter_id = ?', (post_id, session['user_id']))
+        db.commit()
+        flash('You have unreported this post.', 'success')
+        return redirect(url_for('post_detail', post_id=post_id))
+
+    if is_reported(post_id, session['user_id']):
+        flash('You have already reported this post.', 'info')
+        return redirect(url_for('post_detail', post_id=post_id))
+
+    db = get_db()
+    db.execute('INSERT INTO reports (reporter_id, post_id) VALUES (?, ?)', (session['user_id'], post_id))
+    db.commit()
+    flash('You have reported this post.', 'success')
     return redirect(url_for('post_detail', post_id=post_id))
+
+@app.route('/posts/<int:post_id>/undo_report', methods=['POST'])
+def undo_report_post(post_id):
+    if 'user_id' not in session:
+        flash('Log in before unreporting a post', 'danger')
+        return redirect(url_for('login'))
+
+    if not is_reported(post_id, session['user_id']):
+        flash('You have not reported this post.', 'info')
+        return redirect(url_for('post_detail', post_id=post_id))
+
+    db = get_db()
+    db.execute('DELETE FROM reports WHERE post_id = ? AND reporter_id = ?', (post_id, session['user_id']))
+    db.commit()
+    flash('You have unreported this post.', 'success')
+    return redirect(url_for('post_detail', post_id=post_id))
+
 
 with app.app_context():
     create_reports_table()
