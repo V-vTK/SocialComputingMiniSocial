@@ -1086,13 +1086,6 @@ def report_post(post_id):
         flash('Log in before reporting a post', 'danger')
         return redirect(url_for('login'))
 
-    if request.method == 'DELETE':
-        db = get_db()
-        db.execute('DELETE FROM reports WHERE post_id = ? AND reporter_id = ?', (post_id, session['user_id']))
-        db.commit()
-        flash('You have unreported this post.', 'success')
-        return redirect(url_for('post_detail', post_id=post_id))
-
     if is_reported(post_id, session['user_id']):
         flash('You have already reported this post.', 'info')
         return redirect(url_for('post_detail', post_id=post_id))
