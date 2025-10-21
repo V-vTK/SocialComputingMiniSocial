@@ -165,9 +165,9 @@ class Week4:
         For users this was seen as slowness and eventually full downtime. If the Discord developers had known, they would have simply lowered the tombstone lifespan to 2 days avoiding the overload.
 
         When the time comes Mini Social should consider other database options like PostgreSQL, Cassandra or ScyllaDB. Transformations should be done well ahead and tested thoroughly.
-        With Blackbox testing the new database can be tested alongside the old one to compare query results and performance.
+        With Blackbox testing the new database can be tested alongside the old one to compare query results and performance. This way Mini Social can avoid angry users caused by constant slowdowns and crashes.
 
-        Slack had a major outage in 2025 due to database shards which caused API breakdowns. As these sharding errors grow over time it's important to monitor API performance and error rates. 
+        Slack had a major outage in 2025 due to database shards which caused API breakdowns. Slack is used in workplaces which caused major disruptions to businesses and their employees. As these sharding errors grow over time it's important to monitor API performance and error rates. 
         Currently Mini Social does not have any monitoring or alerting in place. Any slowly creeping performance issues are only detected when it's too late.
         For improvement each API endpoint should be monitored for latency and errors. There should also be testing and alerting that triggers when the service starts failing.
         Long downtime causes the users to be unhappy and less confident with the platform.
