@@ -24,7 +24,7 @@ class Week4:
         self.cursor = self.conn.cursor()
         self.tables = self.get_tables()
         self.stop_words = stopwords.words('english')
-        self.stop_words.extend(['would', 'cant', 'got', 'day', 'like', 'today', 'best', 'always', 'amazing', 'bought', 'quick' 'people', 'new', 'fun', 'think', 'know', 'believe',
+        self.stop_words.extend(['would', 'cant', 'got', 'get', 'maybe', 'bit', 'hit', 'tired', 'else', 'wait', 'saw', 'last', 'click', 'finally', 'amze', 'finished', 'hour', 'macbook', 'tried', 'every', 'anyone', 'keep', 'gon', 'top', 'real', 'something', 'made', 'sometimes', 'see', 'youre', 'day', 'like', 'today', 'best', 'always', 'amazing', 'bought', 'quick' 'people', 'new', 'fun', 'think', 'know', 'believe',
                                 'many', 'thing', 'need', 'small', 'even', 'make', 'love', 'mean', 'fact', 'question', 'time', 'reason', 'also', 'could', 'true', 'well',
                                 'life', 'said', 'year', 'going', 'good', 'really', 'much', 'want', 'back', 'look', 'article', 'host', 'university', 'reply', 'thanks', 'mail', 'post', 'please'])
         print('Database connection and class initialized \n')
@@ -47,7 +47,7 @@ class Week4:
     def pretty_print(data):
         print(json.dumps(data, indent=4))
 
-    def exercise1(self, num_of_topics=10, log_results=True):
+    def exercise1(self, include="all", num_of_topics=10, log_results=True):
         '''
         Exercise 4.1 Topics:
         Identify the 10 most popular topics discussed on our platform. Use Latent Dirichlet Allocation (LDA) with the gensim library.
@@ -56,13 +56,17 @@ class Week4:
         # Materials:
         # https://www.geeksforgeeks.org/nlp/topic-modeling-using-latent-dirichlet-allocation-lda/
         # https://github.com/Crowd-Computing-Oulu/soco-exercise-solutions/blob/main/exercise_task_14.py
-        query = """
-            SELECT id, content, 'post' AS table_name
-            FROM posts
-            UNION ALL
-            SELECT id, content, 'comment' AS table_name
-            FROM comments
-        """
+        if include == "all":
+            query = """
+                SELECT id, content, 'post' AS table_name
+                FROM posts
+                UNION ALL
+                SELECT id, content, 'comment' AS table_name
+                FROM comments
+            """
+        else:
+            query = f"SELECT id, content, 'post' AS table_name FROM posts"
+
         data = pd.read_sql_query(query, self.conn)
         
         data['content'] = data['content'].apply(self._preprocess_text)
@@ -130,7 +134,7 @@ class Week4:
         https://www.geeksforgeeks.org/python/python-sentiment-analysis-using-vader/
         '''
         sid = SentimentIntensityAnalyzer()
-        df = self.exercise1(log_results=False)[1]
+        df = self.exercise1(log_results=False, include="all")[1]
         for index, row in df.iterrows():
             content = row['content']
             score = sid.polarity_scores(content)
@@ -197,7 +201,7 @@ class Week4:
 
 if __name__ == "__main__":
     db_class = Week4(db_file='database.sqlite')
-    db_class.exercise1(log_results=True)
+    db_class.exercise1(log_results=True, include="posts")
     db_class.exercise2(log_results=True)
     # db_class.exercise3(log_results=False)
     # db_class.exercise4(log_results=True)
