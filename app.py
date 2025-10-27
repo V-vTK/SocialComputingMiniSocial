@@ -2,6 +2,7 @@ from urllib.parse import urlparse
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 import pandas as pd
 from week3 import detect_tiered_keywords, detect_urls, get_smallest_time_diff, unify_capitalization
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from werkzeug.security import generate_password_hash, check_password_hash
 from cryptography.fernet import Fernet
 import json
@@ -761,6 +762,7 @@ def admin_dashboard():
     posts.sort(key=lambda x: x['risk_score'], reverse=True) # Sort after fetching and scoring
 
     for post in posts:
+        post['sentiment'] = analyze_sentiment(post['content'])
         post['report_count'] = get_report_count(post['id'])
 
     # --- Comments Tab Data ---
@@ -1112,6 +1114,9 @@ def undo_report_post(post_id):
     flash('You have unreported this post.', 'success')
     return redirect(url_for('post_detail', post_id=post_id))
 
+def analyze_sentiment(content):
+    sid = SentimentIntensityAnalyzer()
+    return sid.polarity_scores(content)
 
 with app.app_context():
     create_reports_table()
